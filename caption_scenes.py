@@ -118,24 +118,13 @@ def get_camera_image(
     if row is None:
         return None
 
-    # Try candidate paths in order of likelihood
+    # filename_jpg = "2021.xxx/CAM_F0/hex.jpg" — prepend blob_subdir
     candidates = []
-
     if row["filename_jpg"]:
         fname = row["filename_jpg"]
-        # Might be full relative path from data_root
-        candidates.append(data_root / fname)
-        # Might be just the filename — construct from known structure
-        candidates.append(data_root / blob_subdir / db_stem / camera / fname)
-        # Same but filename might already include extension
+        candidates.append(data_root / blob_subdir / fname)   # primary
+        candidates.append(data_root / fname)                  # fallback: already full rel path
         candidates.append(data_root / blob_subdir / db_stem / camera / Path(fname).name)
-
-    # Fallback: use image token as filename (NuPlan sometimes stores token as hex)
-    if row["token"]:
-        tok = row["token"]
-        if isinstance(tok, bytes):
-            tok = tok.hex()
-        candidates.append(data_root / blob_subdir / db_stem / camera / f"{tok}.jpg")
 
     for p in candidates:
         if p.exists():
