@@ -108,20 +108,28 @@ def get_camera_image(
     blob_subdir: str = "sensor_blobs_mini",
     debug: bool = False,
 ) -> Optional[Image.Image]:
-    row = conn.execute(
-        """SELECT im.filename_jpg, im.token
-           FROM lidar_pc lp
-           JOIN image im ON im.ego_pose_token = lp.ego_pose_token
-           JOIN camera cam ON cam.token = im.camera_token
-           WHERE lp.token = ? AND cam.channel = ?""",
-        (lidarpc_token, camera),
+    # Lidar ~20Hz, cameras ~12Hz — no shared ego_pose_token per frame.
+    # Find the closest camera image by timestamp instead.
+    lp_ts = conn.execute(
+        "SELECT timestamp FROM lidar_pc WHERE token = ?", (lidarpc_token,)
     ).fetchone()
+    if lp_ts is None:
+        return None
+
+    row = conn.execute(
+        """SELECT im.filename_jpg
+           FROM image im
+           JOIN camera cam ON cam.token = im.camera_token
+           WHERE cam.channel = ?
+           ORDER BY ABS(im.timestamp - ?)
+           LIMIT 1""",
+        (camera, lp_ts["timestamp"]),
+    ).fetchone()
+
     if debug:
-        print(f"[DEBUG] token type={type(lidarpc_token)} camera={camera}")
+        print(f"[DEBUG] lidar ts={lp_ts['timestamp']} camera={camera}")
         print(f"[DEBUG] SQL row={dict(row) if row else None}")
-        # also show all channels available
-        chs = conn.execute("SELECT DISTINCT channel FROM camera").fetchall()
-        print(f"[DEBUG] DB channels={[r[0] for r in chs]}")
+
     if row is None:
         return None
 
@@ -129,8 +137,8 @@ def get_camera_image(
     candidates = []
     if row["filename_jpg"]:
         fname = row["filename_jpg"]
-        candidates.append(data_root / blob_subdir / fname)   # primary
-        candidates.append(data_root / fname)                  # fallback: already full rel path
+        candidates.append(data_root / blob_subdir / fname)
+        candidates.append(data_root / fname)
         candidates.append(data_root / blob_subdir / db_stem / camera / Path(fname).name)
     if debug:
         for c in candidates:
