@@ -252,7 +252,7 @@ def process_nuplan_db(
 # ---------------------------------------------------------------------------
 
 def _load_nusc_tables(data_root: Path, version: str) -> dict:
-    """Load all needed nuScenes JSON tables into dicts keyed by token."""
+    """Load nuScenes JSON tables and build devkit-style derived fields."""
     base = data_root / version
     tables = {}
     for name in ["scene", "sample", "sample_data", "sample_annotation",
@@ -260,8 +260,31 @@ def _load_nusc_tables(data_root: Path, version: str) -> dict:
         path = base / f"{name}.json"
         rows = json.loads(path.read_text())
         tables[name] = {r["token"]: r for r in rows}
-        if name in ("scene", "sample", "sample_data", "sample_annotation", "category"):
-            tables[f"{name}_list"] = rows  # keep list order too
+        tables[f"{name}_list"] = rows
+
+    # Build sample["data"] = {channel: sd_token} and sample["anns"] = [ann_token, ...]
+    # (these exist in the devkit but not in raw JSON files)
+    for s in tables["sample"].values():
+        s["data"] = {}
+        s["anns"] = []
+
+    for sd in tables["sample_data_list"]:
+        if not sd.get("is_key_frame"):
+            continue
+        s = tables["sample"].get(sd["sample_token"])
+        if s is None:
+            continue
+        cal = tables["calibrated_sensor"].get(sd["calibrated_sensor_token"], {})
+        sensor = tables["sensor"].get(cal.get("sensor_token", ""), {})
+        channel = sensor.get("channel", "")
+        if channel:
+            s["data"][channel] = sd["token"]
+
+    for ann in tables["sample_annotation_list"]:
+        s = tables["sample"].get(ann["sample_token"])
+        if s is not None:
+            s["anns"].append(ann["token"])
+
     return tables
 
 

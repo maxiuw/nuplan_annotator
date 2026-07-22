@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH -J nusc_caption
-#SBATCH -A Berzelius-2026-200
+#SBATCH --gpus 1 -C fat -A  Berzelius-2026-200
 #SBATCH -t 1-00:00:00
-#SBATCH --gpus 1
 #SBATCH --output /proj/berzelius-2023-364/users/x_macwo/code/nuplan_captioner/logs/%J_%a_nusc.out
 #SBATCH --error  /proj/berzelius-2023-364/users/x_macwo/code/nuplan_captioner/logs/%J_%a_nusc.err
 #SBATCH --array=0-7
