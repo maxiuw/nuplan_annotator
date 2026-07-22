@@ -106,6 +106,7 @@ def get_camera_image(
     lidarpc_token: str,
     camera: str = "CAM_F0",
     blob_subdir: str = "sensor_blobs_mini",
+    debug: bool = False,
 ) -> Optional[Image.Image]:
     row = conn.execute(
         """SELECT im.filename_jpg, im.token
@@ -115,6 +116,12 @@ def get_camera_image(
            WHERE lp.token = ? AND cam.channel = ?""",
         (lidarpc_token, camera),
     ).fetchone()
+    if debug:
+        print(f"[DEBUG] token type={type(lidarpc_token)} camera={camera}")
+        print(f"[DEBUG] SQL row={dict(row) if row else None}")
+        # also show all channels available
+        chs = conn.execute("SELECT DISTINCT channel FROM camera").fetchall()
+        print(f"[DEBUG] DB channels={[r[0] for r in chs]}")
     if row is None:
         return None
 
@@ -125,6 +132,9 @@ def get_camera_image(
         candidates.append(data_root / blob_subdir / fname)   # primary
         candidates.append(data_root / fname)                  # fallback: already full rel path
         candidates.append(data_root / blob_subdir / db_stem / camera / Path(fname).name)
+    if debug:
+        for c in candidates:
+            print(f"[DEBUG] candidate {c} exists={c.exists()}")
 
     for p in candidates:
         if p.exists():
@@ -282,13 +292,14 @@ def process_db(
     stride: int,
     output_file,
     already_done: set[str],
+    debug: bool = False,
 ):
     conn = open_db(db_path)
     db_stem = db_path.stem
     tokens = get_lidarpc_tokens(conn, stride=stride)
     skipped_no_image = 0
 
-    for token in tqdm(tokens, desc=db_stem, leave=False):
+    for i, token in enumerate(tqdm(tokens, desc=db_stem, leave=False)):
         key = f"{db_stem}__{token}"
         if key in already_done:
             continue
@@ -297,7 +308,8 @@ def process_db(
         if not ego:
             continue
 
-        image = get_camera_image(conn, data_root, db_stem, token, camera, blob_subdir)
+        image = get_camera_image(conn, data_root, db_stem, token, camera, blob_subdir,
+                                 debug=(debug and i == 0))
         if image is None:
             skipped_no_image += 1
             continue
@@ -382,6 +394,7 @@ def main():
             process_db(
                 db_path, args.data_root, args.blob_subdir,
                 generate_fn, args.camera, args.stride, out, already_done,
+                debug=args.max_dbs is not None,  # debug mode when testing with --max_dbs
             )
 
     print(f"\nDone. Output: {args.output}")
