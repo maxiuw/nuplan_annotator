@@ -42,9 +42,9 @@ def open_db(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
-def get_lidarpc_tokens(conn: sqlite3.Connection, stride: int = 1) -> list[str]:
+def get_lidarpc_tokens(conn: sqlite3.Connection, stride: int = 1) -> list[bytes]:
     rows = conn.execute("SELECT token FROM lidar_pc ORDER BY timestamp ASC").fetchall()
-    return [r["token"] for r in rows[::stride]]
+    return [r["token"] for r in rows[::stride]]  # bytes — needed for SQL params
 
 
 def get_ego_pose(conn: sqlite3.Connection, lidarpc_token: str) -> dict:
@@ -317,7 +317,8 @@ def process_db(
     skipped_no_image = 0
 
     for i, token in enumerate(tqdm(tokens, desc=db_stem, leave=False)):
-        key = f"{db_stem}__{token}"
+        token_hex = token.hex() if isinstance(token, bytes) else token
+        key = f"{db_stem}__{token_hex}"
         if key in already_done:
             continue
 
@@ -335,6 +336,9 @@ def process_db(
         tl = get_traffic_lights(conn, token)
         ann_text = build_annotation_text(ego, objects, tl)
 
+        # strip non-serializable fields from ego before saving
+        ego_out = {k: v for k, v in ego.items() if k != "yaw"}
+
         try:
             description = generate_fn(image, ann_text)
         except Exception as e:
@@ -343,8 +347,8 @@ def process_db(
         record = {
             "key": key,
             "log": db_stem,
-            "lidarpc_token": token,
-            "ego": ego,
+            "lidarpc_token": token_hex,
+            "ego": ego_out,
             "objects": objects,
             "traffic_lights": tl,
             "annotation_text": ann_text,
