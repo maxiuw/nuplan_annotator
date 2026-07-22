@@ -49,7 +49,7 @@ def get_lidarpc_tokens(conn: sqlite3.Connection, stride: int = 1) -> list[str]:
 
 def get_ego_pose(conn: sqlite3.Connection, lidarpc_token: str) -> dict:
     row = conn.execute(
-        """SELECT ep.vx, ep.vy, ep.heading
+        """SELECT ep.vx, ep.vy, ep.qw, ep.qx, ep.qy, ep.qz
            FROM lidar_pc lp
            JOIN ego_pose ep ON ep.token = lp.ego_pose_token
            WHERE lp.token = ?""",
@@ -58,7 +58,10 @@ def get_ego_pose(conn: sqlite3.Connection, lidarpc_token: str) -> dict:
     if row is None:
         return {}
     speed = math.hypot(row["vx"], row["vy"])
-    heading_deg = math.degrees(row["heading"]) % 360
+    # yaw from quaternion: atan2(2*(qw*qz + qx*qy), 1 - 2*(qy^2 + qz^2))
+    qw, qx, qy, qz = row["qw"], row["qx"], row["qy"], row["qz"]
+    heading_rad = math.atan2(2*(qw*qz + qx*qy), 1 - 2*(qy*qy + qz*qz))
+    heading_deg = math.degrees(heading_rad) % 360
     return {
         "speed_ms": round(speed, 2),
         "speed_kph": round(speed * 3.6, 1),
