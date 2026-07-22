@@ -49,7 +49,7 @@ def get_lidarpc_tokens(conn: sqlite3.Connection, stride: int = 1) -> list[str]:
 
 def get_ego_pose(conn: sqlite3.Connection, lidarpc_token: str) -> dict:
     row = conn.execute(
-        """SELECT ep.vx, ep.vy, ep.qw, ep.qx, ep.qy, ep.qz
+        """SELECT ep.x, ep.y, ep.vx, ep.vy, ep.qw, ep.qx, ep.qy, ep.qz
            FROM lidar_pc lp
            JOIN ego_pose ep ON ep.token = lp.ego_pose_token
            WHERE lp.token = ?""",
@@ -58,11 +58,13 @@ def get_ego_pose(conn: sqlite3.Connection, lidarpc_token: str) -> dict:
     if row is None:
         return {}
     speed = math.hypot(row["vx"], row["vy"])
-    # yaw from quaternion: atan2(2*(qw*qz + qx*qy), 1 - 2*(qy^2 + qz^2))
     qw, qx, qy, qz = row["qw"], row["qx"], row["qy"], row["qz"]
     heading_rad = math.atan2(2*(qw*qz + qx*qy), 1 - 2*(qy*qy + qz*qz))
     heading_deg = math.degrees(heading_rad) % 360
     return {
+        "x": row["x"],
+        "y": row["y"],
+        "yaw": heading_rad,
         "speed_ms": round(speed, 2),
         "speed_kph": round(speed * 3.6, 1),
         "heading_deg": round(heading_deg, 1),
@@ -70,27 +72,34 @@ def get_ego_pose(conn: sqlite3.Connection, lidarpc_token: str) -> dict:
     }
 
 
-def get_tracked_objects(conn: sqlite3.Connection, lidarpc_token: str) -> list[dict]:
+def get_tracked_objects(conn: sqlite3.Connection, lidarpc_token: str, ego: dict) -> list[dict]:
     rows = conn.execute(
-        """SELECT lb.x, lb.y, lb.vx, lb.vy, lb.width, lb.length, cat.name AS category
+        """SELECT lb.x, lb.y, lb.vx, lb.vy, lb.width, lb.length
+               , cat.name AS category
            FROM lidar_box lb
-           JOIN category cat ON cat.token = lb.category_token
+           JOIN track t   ON t.token   = lb.track_token
+           JOIN category cat ON cat.token = t.category_token
            WHERE lb.lidar_pc_token = ?""",
         (lidarpc_token,),
     ).fetchall()
+
+    ego_x, ego_y, ego_yaw = ego["x"], ego["y"], ego["yaw"]
+    cos_h, sin_h = math.cos(-ego_yaw), math.sin(-ego_yaw)
+
     objs = []
     for r in rows:
-        dist = math.hypot(r["x"], r["y"])
-        # x=forward, y=left in ego frame
-        lat = "left" if r["y"] > 0 else "right"
-        lon = "ahead" if r["x"] > 0 else "behind"
+        # world → ego-relative frame (x=forward, y=left)
+        dx, dy = r["x"] - ego_x, r["y"] - ego_y
+        rel_x = cos_h * dx - sin_h * dy
+        rel_y = sin_h * dx + cos_h * dy
+        dist = math.hypot(rel_x, rel_y)
         objs.append({
             "category": r["category"],
             "dist_m": round(dist, 1),
-            "rel_x": round(r["x"], 1),   # positive = ahead
-            "rel_y": round(r["y"], 1),   # positive = left
-            "lateral": lat,
-            "longitudinal": lon,
+            "rel_x": round(rel_x, 1),
+            "rel_y": round(rel_y, 1),
+            "lateral": "left" if rel_y > 0 else "right",
+            "longitudinal": "ahead" if rel_x > 0 else "behind",
             "width": round(r["width"], 1),
             "length": round(r["length"], 1),
             "speed_ms": round(math.hypot(r["vx"], r["vy"]), 2),
@@ -322,7 +331,7 @@ def process_db(
             skipped_no_image += 1
             continue
 
-        objects = get_tracked_objects(conn, token)
+        objects = get_tracked_objects(conn, token, ego)
         tl = get_traffic_lights(conn, token)
         ann_text = build_annotation_text(ego, objects, tl)
 
