@@ -109,9 +109,10 @@ def get_camera_image(
 ) -> Optional[Image.Image]:
     row = conn.execute(
         """SELECT im.filename_jpg, im.token
-           FROM image im
+           FROM lidar_pc lp
+           JOIN image im ON im.ego_pose_token = lp.ego_pose_token
            JOIN camera cam ON cam.token = im.camera_token
-           WHERE im.lidar_pc_token = ? AND cam.channel = ?""",
+           WHERE lp.token = ? AND cam.channel = ?""",
         (lidarpc_token, camera),
     ).fetchone()
     if row is None:
